@@ -1,0 +1,40 @@
+#!/bin/ksh
+###########################################################################################################################
+# SCRIPT: LongRunSQLs.sh
+# AUTHOR: Raghavendra Chiyodu
+# DATE  : 27/09/2014
+# Version : v10
+#
+# PURPOSE:
+#          This script does the task of getting the LOng Running SQL's in the database
+############################################################################################################################
+set -x
+MAILLIST="rchiyodu@in.ibm.com,jaysompa@in.ibm.com,venkkupp@in.ibm.com,gthakare@in.ibm.com"
+#Connect to the database
+db2 connect to $1>>/dev/null
+echo "#########################################################################################################################\n\n">Log.out
+
+echo "Please find the Long Running SQLS in the database $1\n\n">>Log.out
+
+db2 "SELECT ELAPSED_TIME_MIN,SUBSTR(AUTHID,1,10) AS AUTH_ID,AGENT_ID,APPL_STATUS,SUBSTR(STMT_TEXT,1,100) AS SQL_TEXT FROM SYSIBMADM.LONG_RUNNING_SQL WHERE ELA
+PSED_TIME_MIN > 0  ORDER BY ELAPSED_TIME_MIN DESC">>Log.out
+               if test $? -gt 0 ; then
+                      echo "No Long Running SQLS in the database executing for more than one minute">>Log.out
+               fi
+
+#Get the Snapshot for the agentid of the Long Running SQL
+                  db2 -x "SELECT ltrim(rtrim(AGENT_ID)) from SYSIBMADM.LONG_RUNNING_SQL WHERE ELAPSED_TIME_MIN > 0" > Agentlist.out
+                               cnt=`cat Agentlist.out|wc -l`
+                    if [ "$cnt" -gt 0 ] ; then
+                      for i in `cat Agentlist.out`
+                               do
+                                  db2 get snapshot for application agentid $i>>Logsnap.out
+                               done
+                                   else
+                       echo "No Agentid found for LOng Running SQL">>Log.out
+                     fi
+echo "#########################################################################################################################\n\n">>Log.out
+
+uuencode Logsnap.out Logsnap.out> Tempfile.out
+cat Log.out Tempfile.out > TempFile1.out
+mailx -s "Long Running SQL's in the database $1" "$MAILLIST" < TempFile1.out
