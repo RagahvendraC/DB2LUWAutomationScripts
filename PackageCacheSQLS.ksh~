@@ -1,0 +1,165 @@
+#!/bin/ksh
+###########################################################################################################################
+# SCRIPT: PackageCacheSQLS.ksh
+# AUTHOR: Raghavendra Chiyodu
+# DATE  :05/03/2014
+# Version : v1.0
+#
+# PURPOSE:
+#          This script Displays the TOP 20 SQL Statements from the package cache based on different criterias
+#
+# Usage:                        [-I<Get the instance name>]
+#                               [-D<Database name to connect to>]
+#                               [-M<Mail id to which the logfile details would be sent>
+#
+ USAGE="
+ Usage:  PackageCacheSQLS.ksh       [-I<Get the instance name>(mandatory)]
+                                [-D<Database name to connect to>(mandatory)]
+                                [-M<Mail id to which the logfile details would be sent>
+      "
+#
+# Sample: ./PackageCacheSQLS.ksh   -i db2pr1 -d PR1  -m "rchiyodu@in.ibm.com"
+#######################################################################################################################
+
+#set -x
+if [ -f $HOME/sqllib/db2profile ]; then
+    . $HOME/sqllib/db2profile
+fi
+
+# Parse Input
+   while getopts :h:I:i:D:d:M:m: OPT ; do
+        case $OPT in
+        h) echo "${USAGE}"
+           exit 0
+                ;;
+        [Ii])LINSTNAME=`echo "${OPTARG}"`
+                                ;;
+        [Dd])LSTDATABASENAME=`echo "${OPTARG}"`
+                                ;;
+        [Mm])LMAILID=`echo "${OPTARG}"`
+                                ;;
+        *)      # Display the usage string
+                echo "${USAGE}" 1>&2
+                exit 1                ;;
+        esac
+   done
+
+   shift `expr ${OPTIND} - 1`
+#Make the validation for the instance name
+   if test -z "${LINSTNAME}"
+      then
+        echo "${USAGE}"
+        exit 1
+        fi
+        if [ "${LINSTNAME}" != $DB2INSTANCE ];then
+        echo "Incorrect Instance name provided"
+        echo "${USAGE}"
+        exit 1
+        fi
+
+
+#Make Sure that the threeshold Value is entered
+   if test -z "${LSTDATABASENAME}"
+      then
+        echo "${USAGE}"
+        exit 1
+        fi
+
+        DBCHECK=`db2 list active databases |grep "${LSTDATABASENAME}" |wc -l`
+if [ $DBCHECK -eq 0 ]; then
+        tput bold
+        echo "Incorrect Database Name Provided"
+        tput rmso
+        echo "${USAGE}"
+        exit 1
+ db2 connect to "${LSTDATABASENAME}" > /dev/null
+        if test $? -gt 0
+        then
+        tput bold
+        echo "Unable to connect to database. Check the Database Name provided as input"
+        tput rmso
+        exit 1
+        fi
+fi
+
+#Make Sure that the threeshold Value is entered
+   if test -z "${LMAILID}"
+         then
+        echo "${USAGE}"
+        exit 1
+   fi
+
+
+echo "Please find the Top 10 SQL's in the database based on Total Execution Time,Average Execution Time,Average CPU Time,Number of Executions, Number of Sorts">SQLRankpkg.out
+
+echo "#######################################################################################################################################################\n\n">>SQLRankpkg.out
+
+#Get the TOP 10 SQLS by the Total Execution time
+
+echo " 1) Top 20 SQL's in the package cache based on Rows Selectivity with Rows Read and Rows Written\n\n">>SQLRanKpkg.out
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&">>SQLRankpkg.out
+
+db2 "select MEMBER,ROWS_READ,ROWS_RETURNED,case when ROWS_RETURNED = 0 then null else ROWS_READ / ROWS_RETURNED end as "Read / Returned",TOTAL_SECTION_SORTS,SORT_OVERFLOWS,TOTAL_SECTION_SORT_TIME,
+case when TOTAL_SECTION_SORTS = 0 then null else TOTAL_SECTION_SORT_TIME / TOTAL_SECTION_SORTS end as "Time / sort",NUM_EXECUTIONS,substr(STMT_TEXT,1,40) as stmt_text from table(mon_get_pkg_cache_stmt(null,null,null,-2)) as t order by rows_read desc fetch first 20 rows only">>SQLRankpkg.out
+      if test $? -gt 0 ; then
+         echo "Error in getting TOP 10 SQL's by Total Execution Time">>SQLRankpkg.out
+      fi
+
+#Get the Top 10 SQLS by Average Execution Time
+
+echo " 2) Top 10 Ranking SQL's by the Average  Execution Time\n\n">>SQLRankpkg.out
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&">>SQLRankpkg.out
+
+db2 "SELECT substr(stmt_text,1,50) as sql_statement, stmt_exec_time, num_executions,DECIMAL((real(stmt_exec_time) / real(num_executions)),18,9) as avg_exec_time
+FROM table(mon_get_pkg_cache_stmt(null,null,null,-2)) as t WHERE num_executions > 0 ORDER BY 4 desc FETCH FIRST 10 ROWS ONLY">>SQLRankpkg.out
+               if test $? -gt 0 ; then
+                       echo "No Top 10 SQLS Found by Average Execution Time">>SQLRankpkg.out
+              fi
+
+#Get the Top 10 SQLS by Average CPU Time
+
+echo " 3) Top 10 Ranking SQL's by Average CPU Time \n\n">>SQLRankpkg.out
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&">>SQLRankpkg.out
+
+db2 "SELECT substr(stmt_text,1,50) as sql_statement, total_cpu_time,num_executions,
+DECIMAL(((real(total_cpu_time) ) / real(num_executions)),18,9) as avg_cpu_time FROM table(mon_get_pkg_cache_stmt(null,null,null,-2)) as t WHERE num_executions > 0 ORDER BY avg
+_cpu_time desc FETCH FIRST 10 ROWS ONLY">>SQLRankpkg.out
+       if test $? -gt 0 ; then
+             echo "No Top 10 SQLS found by Average CPU time">>SQLRankpkg.out
+       fi
+
+#Get the Top 10 SQLS by Number of Executions
+
+echo " 4) Top 10 Ranking SQL's by Number of Execution\n\n">>SQLRankpkg.out
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&">>SQLRankpkg.out
+
+db2 "SELECT substr(stmt_text,1,50) as sql_statement, stmt_exec_time,num_executions,
+DECIMAL((real(stmt_exec_time) / real(num_executions)),18,9) as avg_exec_time FROM
+table(mon_get_pkg_cache_stmt(null,null,null,-2)) as t WHERE num_executions > 0 ORDER BY 3 desc FETCH FIRST 10 ROWS ONLY">>SQLRankpkg.out
+               if test $? -gt 0 ; then
+                        echo "No Top 10 SQLs Found by Number of Executions">>SQLRankpkg.out
+               fi
+#Get the Top 10 SQLS by Number of sorts
+
+echo "5 ) Top 10 Ranking SQL's by Number of sorts\n\n">>SQLRankpkg.out
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&">>SQLRankpkg.out
+
+db2 "SELECT substr(stmt_text,1,50) as sql_statement, stmt_exec_time, num_executions, TOTAL_sorts,
+DECIMAL((real(stmt_exec_time) / real(num_executions)),18,9) as avg_exec_time FROM
+table(mon_get_pkg_cache_stmt(null,null,null,-2)) as t WHERE num_executions > 0 ORDER BY total_sorts desc FETCH FIRST 10 ROWS ONLY">>SQLRankpkg.out
+     if test $? -gt 0 ; then
+              echo "No TOP 10 SQL's found by Number of sorts">>SQLRankpkg.out
+     fi
+
+cat SQLRankpkg.out | mailx -s "Top 10 Rank SQLS in the database  "${LSTDATABASENAME}"  " "${LMAILID}"
+
+echo "########################################################################################################################################################">>SQLRankpkg.out
+
+         
+
+
