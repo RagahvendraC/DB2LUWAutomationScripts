@@ -1,0 +1,125 @@
+#!/bin/ksh
+set -x
+###########################################################################################################################
+# SCRIPT: HighImpactSQLS.ksh
+# AUTHOR: Raghavendra Chiyodu
+# DATE  :03/11/2014
+# Version : v1.0
+#
+# PURPOSE:
+#          This script Displays the high impact queries by statement execution time,CPU Intensive Queries and I/O Intensive Queries
+#
+#
+# Usage: HighImpactSQLS.ksh    [-I<Get the instance name>]
+#                               [-D<Database name to connect to>]
+#                               [-M<Mail id to which the logfile details would be sent>
+#
+ USAGE="
+ Usage:  HighImpactSQLS.ksh    [-I<Get the instance name>(mandatory)]
+                               [-D<Database name to connect to>(mandatory)]
+                               [-M<Mail id to which the logfile details would be sent>
+      "
+#
+# Sample: ./HighImpactSQLS.ksh  -i db2pr1 -d PR1  -m "rchiyodu@in.ibm.com"
+#######################################################################################################################
+
+#set -x
+if [ -f $HOME/sqllib/db2profile ]; then
+    . $HOME/sqllib/db2profile
+fi
+
+# Parse Input
+   while getopts :h:I:i:D:d:M:m: OPT ; do
+        case $OPT in
+        h) echo "${USAGE}"
+           exit 0
+                ;;
+        [Ii])LINSTNAME=`echo "${OPTARG}"`
+                                ;;
+        [Dd])LSTDATABASENAME=`echo "${OPTARG}"`
+                                ;;
+        [Mm])LMAILID=`echo "${OPTARG}"`
+                                ;;
+        *)      # Display the usage string
+                echo "${USAGE}" 1>&2
+                exit 1                ;;
+        esac
+   done
+
+   shift `expr ${OPTIND} - 1`
+#Make the validation for the instance name
+   if test -z "${LINSTNAME}"
+      then
+        echo "${USAGE}"
+        exit 1
+        fi
+        
+
+#Make Sure that the threeshold Value is entered
+   if test -z "${LSTDATABASENAME}"
+      then
+        echo "${USAGE}"
+        exit 1
+        fi
+
+ db2 connect to "${LSTDATABASENAME}" > /dev/null
+        if test $? -gt 0
+        then
+        tput bold
+        echo "Unable to connect to database. Check the Database Name provided as input"
+        tput rmso
+        exit 1
+        fi
+
+#Make Sure that the threeshold Value is entered
+   if test -z "${LMAILID}"
+      then
+        echo "${USAGE}"
+        exit 1
+   fi
+
+
+echo "Please find the High Impact queries by statement execution,CPU Intensive,I/O Intensive in the database $1">SQLRanK.out
+
+echo "#######################################################################################################################################################\n\n">>SQLRanK.out
+
+
+echo " 1) High Impact Queries  by statement execution time\n\n" >>SQLRanK.out
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&">>SQLRanK.out
+
+db2 "select stmt_exec_time, num_executions, substr(stmt_text,1,100) as SQLTEXT  from table(mon_get_pkg_cache_stmt(null,null,null,-2)) as s order by stmt_exec_time desc
+fetch first 5 rows only">>SQLRanK.out
+               if test $? -gt 0 ; then
+                       echo "Error in getting the High Impact Queries by statement execution time"
+               fi
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n\n">>SQLRanK.out
+
+echo " 2) High Impact CPU Intensive Queriesn\n">>SQLRanK.out
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&">>SQLRanK.out
+
+db2 "select stmt_exec_time, num_executions,(total_cpu_time / 1000) as cpu_time,substr(stmt_text,1,100) as SQLTEXT from table(mon_get_pkg_cache_stmt(null,null,null,-2)) as s
+order by cpu_time desc fetch first 5 rows only">>SQLRanK.out
+                if test $? -gt 0 ; then
+                        echo "Error in getting the CPU Intensive Queries"
+                fi
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&\n\n">>SQLRanK.out
+
+echo " 3) High Impact IO Intensive Querie\n\n">>SQLRanK.out
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&">>SQLRanK.out
+
+db2 "select stmt_exec_time, num_executions,(pool_read_time + pool_write_time +direct_read_time + direct_write_time) as io_time,substr(stmt_text,1,100) as SQLTEXT 
+from table(mon_get_pkg_cache_stmt(null,null,null,-2)) as t order by io_time desc fetch first 5 rows only">>SQLRanK.out
+                        if test $? -gt 0 ; then
+                             echo "Error in geting the HIGH I/O intensive queries in the database"
+                        fi
+cat SQLRanK.out | mailx -s "High Impact CPU Intensive and I/O Intensive Queries in he database  "${LSTDATABASENAME}"  " "${LMAILID}"
+
+echo "########################################################################################################################################################">>SQLRanK.out
+
+echo "&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&">>SQLRanK.out
+
